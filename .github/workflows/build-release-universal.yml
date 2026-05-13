@@ -1,0 +1,277 @@
+name: Build Universal Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  python-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e .[dev]
+      - run: python infer.py --help
+      - run: python download_models.py --dry_run
+      - run: pytest
+
+  build-runtime:
+    name: Build ${{ matrix.label }} runtime
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runtime: cpu
+            label: CPU
+            env_name: transwithai-cohere-timestamp-cpu
+            env_file: environment-cpu.yml
+            build_script: scripts/build-crispasr-cpu.sh
+            artifact_path: build/crispasr-cpu
+          - runtime: vulkan
+            label: Vulkan
+            env_name: transwithai-cohere-timestamp-vulkan
+            env_file: environment-vulkan.yml
+            build_script: scripts/build-crispasr-vulkan.sh
+            artifact_path: build/crispasr-vulkan
+          - runtime: cuda118
+            label: CUDA 11.8
+            env_name: transwithai-cohere-timestamp-cuda118
+            env_file: environment-cuda118.yml
+            build_script: scripts/build-crispasr-cuda118.sh
+            artifact_path: build/crispasr-cuda118
+          - runtime: cuda122
+            label: CUDA 12.2
+            env_name: transwithai-cohere-timestamp-cuda122
+            env_file: environment-cuda122.yml
+            build_script: scripts/build-crispasr-cuda122.sh
+            artifact_path: build/crispasr-cuda122
+          - runtime: cuda128
+            label: CUDA 12.8
+            env_name: transwithai-cohere-timestamp-cuda128
+            env_file: environment-cuda128.yml
+            build_script: scripts/build-crispasr-cuda128.sh
+            artifact_path: build/crispasr-cuda128
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf
+
+      - name: Install Vulkan system headers
+        if: matrix.runtime == 'vulkan'
+        run: |
+          sudo apt-get install -y libvulkan-dev glslc glslang-tools spirv-headers
+
+      - name: Setup Miniforge
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          environment-file: ${{ matrix.env_file }}
+          activate-environment: ${{ matrix.env_name }}
+          use-mamba: true
+          python-version: "3.11"
+
+      - name: Build CrispASR runtime
+        run: |
+          bash -n scripts/build-crispasr-cpu.sh scripts/build-crispasr-cuda.sh scripts/build-crispasr-cuda118.sh scripts/build-crispasr-cuda122.sh scripts/build-crispasr-cuda128.sh scripts/build-crispasr-vulkan.sh scripts/setup.sh
+          if [[ "${{ matrix.runtime }}" == cuda* ]]; then
+            echo "CUDA architectures: $(${{ matrix.build_script }} --print-cuda-architectures)"
+          fi
+          JOBS=4 ${{ matrix.build_script }}
+
+      - name: Remove CUDA compiler packages before staging
+        if: startsWith(matrix.runtime, 'cuda')
+        run: |
+          conda remove -y cuda-compiler cuda-nvcc cuda-nvcc_linux-64 cuda-crt cuda-cuobjdump cuda-cuxxfilt cuda-nvdisasm cuda-nvprune || true
+          conda clean -afy
+
+      - name: Verify runtime executable
+        run: |
+          if [[ "${{ matrix.runtime }}" == cuda* ]]; then
+            test -x ${{ matrix.artifact_path }}/bin/crispasr
+            python scripts/package-universal.py \
+              --check-runtime-linkage \
+              --runtime-binary ${{ matrix.artifact_path }}/bin/crispasr \
+              --allow-missing-cuda-driver
+          else
+            ${{ matrix.artifact_path }}/bin/crispasr --version
+            ${{ matrix.artifact_path }}/bin/crispasr --list-backends-json | python -m json.tool >/dev/null
+          fi
+
+      - name: Stage runtime artifact
+        run: |
+          python scripts/package-universal.py \
+            --stage-runtime \
+            --runtime-name ${{ matrix.runtime }} \
+            --runtime-build-dir ${{ matrix.artifact_path }} \
+            --runtime-output runtimes/linux-x64/${{ matrix.runtime }}
+
+      - name: Verify staged runtime artifact
+        run: |
+          if [[ "${{ matrix.runtime }}" == cuda* ]]; then
+            test -x runtimes/linux-x64/${{ matrix.runtime }}/bin/crispasr
+            env -u LD_LIBRARY_PATH python scripts/package-universal.py \
+              --check-runtime-linkage \
+              --runtime-binary runtimes/linux-x64/${{ matrix.runtime }}/bin/crispasr \
+              --allow-missing-cuda-driver
+          else
+            env -u LD_LIBRARY_PATH runtimes/linux-x64/${{ matrix.runtime }}/bin/crispasr --version
+            env -u LD_LIBRARY_PATH runtimes/linux-x64/${{ matrix.runtime }}/bin/crispasr --list-backends-json | python -m json.tool >/dev/null
+            env -u LD_LIBRARY_PATH python scripts/package-universal.py \
+              --check-runtime-linkage \
+              --runtime-binary runtimes/linux-x64/${{ matrix.runtime }}/bin/crispasr
+          fi
+
+      - name: Upload runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crispasr-linux-x64-${{ matrix.runtime }}
+          path: runtimes/linux-x64/${{ matrix.runtime }}/
+          retention-days: 30
+
+  package-universal:
+    name: Package universal Linux bundle
+    needs: [python-smoke, build-runtime]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e .[dev]
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: crispasr-linux-x64-cpu
+          path: runtimes/linux-x64/cpu
+      - uses: actions/download-artifact@v4
+        with:
+          name: crispasr-linux-x64-vulkan
+          path: runtimes/linux-x64/vulkan
+      - uses: actions/download-artifact@v4
+        with:
+          name: crispasr-linux-x64-cuda118
+          path: runtimes/linux-x64/cuda118
+      - uses: actions/download-artifact@v4
+        with:
+          name: crispasr-linux-x64-cuda122
+          path: runtimes/linux-x64/cuda122
+      - uses: actions/download-artifact@v4
+        with:
+          name: crispasr-linux-x64-cuda128
+          path: runtimes/linux-x64/cuda128
+
+      - name: Download model artifacts
+        run: |
+          python download_models.py
+
+      - name: Create release archives
+        run: |
+          python scripts/package-universal.py --runtime cpu --archive dist/transwithai_cohere_timestamp_linux-x64_cpu.zip
+          python scripts/package-universal.py --runtime vulkan --archive dist/transwithai_cohere_timestamp_linux-x64_vulkan.zip
+          python scripts/package-universal.py --runtime cuda118 --archive dist/transwithai_cohere_timestamp_linux-x64_cuda118.zip
+          python scripts/package-universal.py --runtime cuda122 --archive dist/transwithai_cohere_timestamp_linux-x64_cuda122.zip
+          python scripts/package-universal.py --runtime cuda128 --archive dist/transwithai_cohere_timestamp_linux-x64_cuda128.zip
+          python scripts/package-universal.py --archive dist/transwithai_cohere_timestamp_linux-x64_universal.zip
+          python infer.py --help
+
+      - name: Upload CPU bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: transwithai_cohere_timestamp_linux-x64_cpu
+          path: dist/transwithai_cohere_timestamp_linux-x64_cpu.zip
+          retention-days: 30
+
+      - name: Upload Vulkan bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: transwithai_cohere_timestamp_linux-x64_vulkan
+          path: dist/transwithai_cohere_timestamp_linux-x64_vulkan.zip
+          retention-days: 30
+
+      - name: Upload CUDA 11.8 bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: transwithai_cohere_timestamp_linux-x64_cuda118
+          path: dist/transwithai_cohere_timestamp_linux-x64_cuda118.zip
+          retention-days: 30
+
+      - name: Upload CUDA 12.2 bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: transwithai_cohere_timestamp_linux-x64_cuda122
+          path: dist/transwithai_cohere_timestamp_linux-x64_cuda122.zip
+          retention-days: 30
+
+      - name: Upload CUDA 12.8 bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: transwithai_cohere_timestamp_linux-x64_cuda128
+          path: dist/transwithai_cohere_timestamp_linux-x64_cuda128.zip
+          retention-days: 30
+
+      - name: Upload universal artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: transwithai_cohere_timestamp_linux-x64_universal
+          path: dist/transwithai_cohere_timestamp_linux-x64_universal.zip
+          retention-days: 30
+
+  create-release:
+    name: Upload GitHub release asset
+    needs: [package-universal]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: transwithai_cohere_timestamp_linux-x64_universal
+          path: release/
+      - uses: actions/download-artifact@v4
+        with:
+          name: transwithai_cohere_timestamp_linux-x64_cpu
+          path: release/
+      - uses: actions/download-artifact@v4
+        with:
+          name: transwithai_cohere_timestamp_linux-x64_vulkan
+          path: release/
+      - uses: actions/download-artifact@v4
+        with:
+          name: transwithai_cohere_timestamp_linux-x64_cuda118
+          path: release/
+      - uses: actions/download-artifact@v4
+        with:
+          name: transwithai_cohere_timestamp_linux-x64_cuda122
+          path: release/
+      - uses: actions/download-artifact@v4
+        with:
+          name: transwithai_cohere_timestamp_linux-x64_cuda128
+          path: release/
+      - name: Create release with large-file support
+        uses: ading2210/gh-large-releases@v1
+        with:
+          repository: ${{ github.repository }}
+          tag_name: ${{ github.ref }}
+          name: ${{ github.ref_name }}
+          files: release/*.zip
+          token: ${{ secrets.GITHUB_TOKEN }}

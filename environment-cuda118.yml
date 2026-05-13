@@ -1,0 +1,14 @@
+name: transwithai-cohere-timestamp-cuda118
+channels:
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - cmake
+  - ninja
+  - cuda-compiler=11.8
+  - cuda-libraries-dev=11.8
+  - cuda-runtime=11.8
+  - pip:
+      - -e .[dev]

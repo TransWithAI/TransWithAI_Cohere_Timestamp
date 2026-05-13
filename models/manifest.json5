@@ -1,0 +1,27 @@
+{
+  "notes": [
+    "URLs and sha256 values are pinned from Hugging Face model metadata for bundled artifacts.",
+    "Qwen3 forced aligner must be explicit; do not rely on CrispASR -am auto because auto maps to canary CTC.",
+    "Whisper VAD is bundled explicitly so -vm does not need to resolve CrispASR's cache alias."
+  ],
+  "artifacts": [
+    {
+      "name": "Cohere Japanese ASR model",
+      "path": "models/cohere/model.gguf",
+      "url": "https://huggingface.co/TransWithAI/cohere-transcribe-ja-v0.1-GGUF/resolve/c5d36d66dc7d92ade00e01862a95b571c04b446b/cohere-asr-ja-v0.1-q6_k.gguf",
+      "sha256": "192eee151417b6a7b08fff7023a1e3126306391e25c3ad9903d8562fdf2f75f4"
+    },
+    {
+      "name": "Qwen3 forced aligner",
+      "path": "models/qwen3-forced-aligner.gguf",
+      "url": "https://huggingface.co/cstr/qwen3-forced-aligner-0.6b-GGUF/resolve/main/qwen3-forced-aligner-0.6b-q4_k.gguf",
+      "sha256": "a7bb4cbeacc6414f11a5d23dc7661a51a941a71e6d559dc7b408b52473f2ae84"
+    },
+    {
+      "name": "Whisper VAD ASMR model",
+      "path": "models/vad/whisper-vad-asmr-q4_k.gguf",
+      "url": "https://huggingface.co/cstr/whisper-vad-encdec-asmr-GGUF/resolve/main/whisper-vad-asmr-q4_k.gguf",
+      "sha256": "19dbeae533f74988d759ad31e656ffc7ffe4cbbdab44c36fc0aa7707464d7cbf"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "include": ["src", "tests", "download_models.py", "infer.py"],
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": ["src"]
+    }
+  ]
+}

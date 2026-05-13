@@ -1,0 +1,12 @@
+name: transwithai-cohere-timestamp-vulkan
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - cmake
+  - ninja
+  - vulkan-headers
+  - shaderc
+  - pip:
+      - -e .[dev]

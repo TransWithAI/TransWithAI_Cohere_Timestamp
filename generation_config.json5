@@ -1,0 +1,23 @@
+{
+  // Defaults are Japanese subtitles through CrispASR's Cohere backend.
+  "language": "ja",
+  "sub_formats": ["srt"],
+  "audio_suffixes": ["wav", "flac", "mp3"],
+  "model_name_or_path": "models/cohere/model.gguf",
+  "qwen3_forced_aligner_path": "models/qwen3-forced-aligner.gguf",
+  "force_aligner": true,
+  "crispasr_path": "auto",
+  "device": "auto",
+  "compute_type": "auto",
+  "gpu_backend": null,
+  "vad_filter": true,
+  "vad_model": "models/vad/whisper-vad-asmr-q4_k.gguf",
+  "split_on_punct": true,
+  "output_dir": null,
+  "overwrite": false,
+  "segment_merge": {
+    "enabled": true,
+    "max_gap_ms": 2000,
+    "max_duration_ms": 20000
+  }
+}

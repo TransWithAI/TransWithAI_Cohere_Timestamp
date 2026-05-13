@@ -1,0 +1,11 @@
+name: transwithai-cohere-timestamp-cpu
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - cmake
+  - ninja
+  - compilers
+  - pip:
+      - -e .[dev]
